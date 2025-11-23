@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 #property strict
 #property copyright "Copyright 2025"
-#property version   "1.45"
+#property version   "1.60"
 
 //--- includes da biblioteca GUI
 #include <Controls\Dialog.mqh>
@@ -12,6 +12,9 @@
 #include <Controls\Edit.mqh>
 #include <Controls\Button.mqh>
 #include <Controls\SpinEdit.mqh>
+
+//--- trade
+#include <Trade\Trade.mqh>
 
 // nomes / prefixos
 #define BOLETA_PREFIX          "boleta_"
@@ -45,6 +48,10 @@
 #define OBJ_LB_SALDO           BOLETA_PREFIX"lb_saldo"
 #define OBJ_LB_SALDO_DET       BOLETA_PREFIX"lb_saldo_det"
 
+// área de resultado / controle da operação
+#define OBJ_LB_RESULT          BOLETA_PREFIX"lb_result"
+#define OBJ_BTN_TRADE          BOLETA_PREFIX"btn_trade"
+
 // Cores do gráfico
 color BULL_COLOR = clrDeepSkyBlue;
 color BEAR_COLOR = clrOrangeRed;
@@ -67,6 +74,9 @@ string g_last_overlay_name = "";
 
 // chart id “oficial” do EA (para Destroy, etc.)
 long g_chart_id = 0;
+
+// objeto de trade
+CTrade g_trade;
 
 //+------------------------------------------------------------------+
 //| Auxiliares                                                       |
@@ -159,7 +169,16 @@ public:
    CLabel    m_lbSeparator;   // separador dentro do diálogo
    CLabel    m_lbColDivider;  // divisão vertical (colunas)
 
+   // área de resultado / controle
+   CLabel    m_lbResult;
+   CButton   m_btnTrade;
+
    bool      m_isUpdating;
+   bool      m_pairOpen;
+
+   // símbolos atuais para atualização em tempo real
+   string    m_baseSymbol;
+   string    m_overlaySymbol;
 
    // criação do diálogo
    bool CreateBoleta(const long chart_id)
@@ -167,19 +186,26 @@ public:
       int subwin=0;
       const int dlg_x      = 10;
       const int dlg_y      = 30;
-      const int dlg_width  = 620;  // mant?m largura original
+      const int dlg_width  = 620;
       const int dlg_height = 395;
 
-      const int col1_x     = 20;   // margem esquerda da coluna 1
-      const int col_width  = 300;  // componentes compactados na metade esquerda
-      const int col_gap    = 20;   // espa?o vazio entre colunas
-      const int divider_x  = col1_x + col_width + (col_gap/2); // divisor central
+      const int col1_x     = 20;
+      const int col_width  = 300;
+      const int col_gap    = 20;
+      const int divider_x  = col1_x + col_width + (col_gap/2);
 
-      const int field_x    = col1_x + 120; // x dos edits de texto
-      const int field_w    = 120;          // largura dos edits de texto
+      const int field_x    = col1_x + 120;
+      const int field_w    = 120;
+
+      // coluna direita (quadro de resultado)
+      const int col2_x     = divider_x + 10;
+      const int col2_w     = dlg_width - (col2_x - dlg_x) - 20;
 
       Boleta_ClearObjects(chart_id);
-      m_isUpdating = false;
+      m_isUpdating   = false;
+      m_pairOpen     = false;
+      m_baseSymbol   = _Symbol;
+      m_overlaySymbol= _Symbol;
 
       // cria o diálogo principal
       ResetLastError();
@@ -198,7 +224,7 @@ public:
       ObjectSetInteger(chart_id,Name(),OBJPROP_STYLE,   STYLE_SOLID);
       ObjectSetInteger(chart_id,Name(),OBJPROP_BACK,    true);
 
-      // --- Ativo do grafico (mais acima)
+      // --- Ativo do grafico
       const int y_ativo     = 15;
       const int y_venda     = 40;
       const int y_compra    = 70;
@@ -206,7 +232,7 @@ public:
       const int y_sep       = 130;
       const int y_lote_base = 145;
       const int y_lote_over = 175;
-      const int y_calc_start= y_lote_over + 60; // início da área de cálculos abaixo dos spinners
+      const int y_calc_start= y_lote_over + 60;
 
       m_lbAtivo.Create(chart_id,OBJ_ATIVO_LABEL,subwin,col1_x,y_ativo,col1_x+col_width-20,y_ativo+16);
       m_lbAtivo.Text("Ativo do grafico: "+_Symbol);
@@ -239,7 +265,7 @@ public:
       ObjectSetInteger(chart_id,OBJ_ED_COMPRA,OBJPROP_BGCOLOR,     COL_EDIT_BG);
       ObjectSetInteger(chart_id,OBJ_ED_COMPRA,OBJPROP_BORDER_COLOR,COL_EDIT_BORDER);
 
-      // --- Botao PESQUISAR (mais à esquerda)
+      // --- Botao PESQUISAR
       int bx = col1_x + 10;
       m_btnSearch.Create(chart_id,OBJ_BTN_SEARCH,subwin,bx,y_btn,bx+220,y_btn+28);
       m_btnSearch.Text("[>] PESQUISAR ATIVOS");
@@ -248,7 +274,7 @@ public:
       ObjectSetString(chart_id,OBJ_BTN_SEARCH,OBJPROP_TOOLTIP,
                       "Clique para carregar o ativo vendido e o overlay em D1");
 
-      // --- Separador como CLabel (anda junto com o dialogo)
+      // --- Separador
       m_lbSeparator.Create(chart_id,OBJ_SEPARATOR,subwin,col1_x,y_sep,col1_x+col_width,y_sep+1);
       m_lbSeparator.Text("");
       Add(m_lbSeparator);
@@ -256,7 +282,7 @@ public:
       ObjectSetInteger(chart_id,OBJ_SEPARATOR,OBJPROP_COLOR,   COL_BTN_BORDER);
       ObjectSetInteger(chart_id,OBJ_SEPARATOR,OBJPROP_BACK,true);
 
-      // --- Divisor vertical para separar as duas colunas
+      // --- Divisor vertical
       m_lbColDivider.Create(chart_id,OBJ_COL_DIVIDER,subwin,divider_x,15,divider_x+1,dlg_height-20);
       m_lbColDivider.Text("");
       Add(m_lbColDivider);
@@ -266,7 +292,7 @@ public:
 
       // layout interno para quantidades
       const int colA_x   = col1_x;
-      const int colB_x   = col1_x; // compra fica abaixo da venda
+      const int colB_x   = col1_x;
       const int spin_w   = 60;
       const int spin_h   = 22;
       const int mult_w   = 20;
@@ -308,7 +334,7 @@ public:
       Add(m_lbFormBase);
       ObjectSetInteger(chart_id,OBJ_LB_FORM_BASE,OBJPROP_COLOR, COL_TEXT_SECOND);
 
-      // --- Coluna direita (comprado) agora abaixo
+      // --- Coluna direita (comprado)
       m_lbLoteOver.Create(chart_id,OBJ_LB_LOTE_OVER,subwin,colB_x,y_lote_over,colB_x+140,y_lote_over+16);
       m_lbLoteOver.Text("Qtd comprada (acoes):");
       Add(m_lbLoteOver);
@@ -352,10 +378,33 @@ public:
       Add(m_lbSaldoDet);
       ObjectSetInteger(chart_id,OBJ_LB_SALDO_DET,OBJPROP_COLOR, COL_TEXT_SECOND);
 
+      // --- QUADRO DE RESULTADO (lado direito)
+      int result_y1 = y_ativo;
+      int result_y2 = result_y1 + 120;
+
+      m_lbResult.Create(chart_id,OBJ_LB_RESULT,subwin,
+                        col2_x,result_y1,col2_x+col2_w,result_y2);
+      m_lbResult.Text("Resultado atual da operacao:\n\nNenhuma operacao aberta.");
+      Add(m_lbResult);
+      ObjectSetInteger(chart_id,OBJ_LB_RESULT,OBJPROP_COLOR,       COL_TEXT_MAIN);
+      ObjectSetInteger(chart_id,OBJ_LB_RESULT,OBJPROP_BGCOLOR,     COL_EDIT_BG);
+      ObjectSetInteger(chart_id,OBJ_LB_RESULT,OBJPROP_BACK,        true);
+      ObjectSetInteger(chart_id,OBJ_LB_RESULT,OBJPROP_BORDER_COLOR,COL_EDIT_BORDER);
+
+      // botão INICIAR / ENCERRAR
+      int trade_btn_y = result_y2 + 10;
+      m_btnTrade.Create(chart_id,OBJ_BTN_TRADE,subwin,
+                        col2_x+20,trade_btn_y,col2_x+20+220,trade_btn_y+28);
+      m_btnTrade.Text("INICIAR OPERACAO");
+      Add(m_btnTrade);
+      Boleta_StyleButton(chart_id,OBJ_BTN_TRADE,false);
+      ObjectSetString(chart_id,OBJ_BTN_TRADE,OBJPROP_TOOLTIP,
+                      "Abre/encerra a operacao de Long & Short (vende base, compra overlay)");
+
       return(Run());
      }
 
-   // --- atualiza totais (agora spinners já estão em ações)
+   // --- atualiza totais e saldo (também chama UpdatePairStatus)
    void UpdateTotals(const string base_symbol,const string overlay_symbol)
      {
       long chart_id = ChartID();
@@ -372,7 +421,6 @@ public:
          return;
         }
 
-      // agora o valor do spin já é quantidade de ações
       double qty_base = (double)m_edLoteBase.Value();
       double qty_over = (double)m_edLoteOver.Value();
       if(qty_base<100) qty_base = 100;
@@ -412,10 +460,260 @@ public:
       ObjectSetString(chart_id,OBJ_LB_SALDO,OBJPROP_TEXT,saldo_txt);
       ObjectSetString(chart_id,OBJ_LB_SALDO_DET,OBJPROP_TEXT,detalhe);
 
+      // também atualiza status da operacao
+      UpdatePairStatus(base_symbol,overlay_symbol);
+
       m_isUpdating = false;
      }
 
-   // tratamento de eventos (botão PESQUISAR + ON_CHANGE dos spins)
+   // --- obtém info de posição por símbolo
+   bool GetPositionInfo(const string symbol,double &volume,ENUM_POSITION_TYPE &type,double &profit)
+     {
+      volume = 0.0;
+      profit = 0.0;
+      type   = POSITION_TYPE_BUY;
+
+      if(!PositionSelect(symbol))
+         return(false);
+
+      volume = PositionGetDouble(POSITION_VOLUME);
+      profit = PositionGetDouble(POSITION_PROFIT);
+      type   = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      return(true);
+     }
+
+   // --- atualiza quadro de resultado e estado do botão
+   void UpdatePairStatus(const string base_symbol,const string overlay_symbol)
+     {
+      long chart_id = ChartID();
+
+      double vol_base, vol_over;
+      double p_base,  p_over;
+      ENUM_POSITION_TYPE t_base, t_over;
+
+      bool has_base = GetPositionInfo(base_symbol,vol_base,t_base,p_base);
+      bool has_over = GetPositionInfo(overlay_symbol,vol_over,t_over,p_over);
+
+      m_pairOpen = (has_base && has_over &&
+                    t_base==POSITION_TYPE_SELL &&
+                    t_over==POSITION_TYPE_BUY);
+
+      string txt;
+
+      if(!m_pairOpen)
+        {
+         txt = "Resultado atual da operacao:\n\nNenhuma operacao de L&S aberta\npara este par ("
+               + base_symbol + " x " + overlay_symbol + ").";
+        }
+      else
+        {
+         double total_profit = p_base + p_over;
+         txt = StringFormat("Resultado atual da operacao:\n\n"
+                            "Vendido: %s (%.0f)\n"
+                            "Comprado: %s (%.0f)\n\n"
+                            "Lucro/prejuizo combinado: R$ %.2f",
+                            base_symbol,vol_base,
+                            overlay_symbol,vol_over,
+                            total_profit);
+        }
+
+      ObjectSetString(chart_id,OBJ_LB_RESULT,OBJPROP_TEXT,txt);
+
+      if(m_pairOpen)
+         m_btnTrade.Text("ENCERRAR OPERACAO");
+      else
+         m_btnTrade.Text("INICIAR OPERACAO");
+     }
+
+   // --- abre operação de Long & Short (vende base, compra overlay)
+   bool OpenLongShort(const string base_symbol,const string overlay_symbol,
+                      double qty_base,double qty_over)
+     {
+      // evita duplicar par
+      UpdatePairStatus(base_symbol,overlay_symbol);
+      if(m_pairOpen)
+        {
+         MessageBox("Ja existe operacao aberta para este par.\nUse 'ENCERRAR OPERACAO' para fechar.","Boleta L&S",MB_ICONINFORMATION);
+         return(false);
+        }
+
+      // checa se auto-trading está habilitado
+      if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
+        {
+         MessageBox("Negociacao automatica desabilitada no terminal ou no EA.\n"
+                    "Verifique o botao Algoritmo, as Opcoes e o F7.",
+                    "Boleta L&S", MB_ICONERROR);
+         return(false);
+        }
+
+      // garante seleção dos símbolos
+      if(!SymbolSelect(base_symbol,true) || !SymbolSelect(overlay_symbol,true))
+        {
+         MessageBox("Falha ao selecionar simbolos para operacao.","Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      // verifica modo de trade
+      if(SymbolInfoInteger(base_symbol,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED ||
+         SymbolInfoInteger(overlay_symbol,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED)
+        {
+         MessageBox("Um dos simbolos esta com trade desabilitado.","Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      double vol_base = qty_base;
+      double vol_over = qty_over;
+
+      // normaliza volumes conforme min/max/step
+      double minB = SymbolInfoDouble(base_symbol,SYMBOL_VOLUME_MIN);
+      double maxB = SymbolInfoDouble(base_symbol,SYMBOL_VOLUME_MAX);
+      double stpB = SymbolInfoDouble(base_symbol,SYMBOL_VOLUME_STEP);
+
+      double minO = SymbolInfoDouble(overlay_symbol,SYMBOL_VOLUME_MIN);
+      double maxO = SymbolInfoDouble(overlay_symbol,SYMBOL_VOLUME_MAX);
+      double stpO = SymbolInfoDouble(overlay_symbol,SYMBOL_VOLUME_STEP);
+
+      if(vol_base < minB) vol_base = minB;
+      if(vol_base > maxB) vol_base = maxB;
+      if(vol_over < minO) vol_over = minO;
+      if(vol_over > maxO) vol_over = maxO;
+
+      vol_base = MathFloor(vol_base / stpB) * stpB;
+      vol_over = MathFloor(vol_over / stpO) * stpO;
+
+      if(vol_base<=0 || vol_over<=0)
+        {
+         MessageBox("Volume invalido para abertura das ordens.","Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      // checagem básica de margem
+      double priceB = SymbolInfoDouble(base_symbol,SYMBOL_BID);
+      double priceO = SymbolInfoDouble(overlay_symbol,SYMBOL_ASK);
+      double marginB, marginO;
+
+      if(!OrderCalcMargin(ORDER_TYPE_SELL,base_symbol,vol_base,priceB,marginB) ||
+         !OrderCalcMargin(ORDER_TYPE_BUY, overlay_symbol,vol_over,priceO,marginO))
+        {
+         MessageBox("Falha ao calcular margem para as ordens.","Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+      if(freeMargin < (marginB + marginO))
+        {
+         MessageBox("Margem livre insuficiente para abrir a operacao.","Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      // não deve haver posição CONTRARIA
+      double vtmp; double ptmp; ENUM_POSITION_TYPE ttmp;
+      if(GetPositionInfo(base_symbol,vtmp,ttmp,ptmp) && ttmp==POSITION_TYPE_BUY)
+        {
+         MessageBox("Ja existe posicao comprada em "+base_symbol+". Nao e seguro abrir venda.","Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+      if(GetPositionInfo(overlay_symbol,vtmp,ttmp,ptmp) && ttmp==POSITION_TYPE_SELL)
+        {
+         MessageBox("Ja existe posicao vendida em "+overlay_symbol+". Nao e seguro abrir compra.","Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      // configuração de preenchimento
+      g_trade.SetTypeFillingBySymbol(base_symbol);
+      g_trade.SetTypeFillingBySymbol(overlay_symbol);
+
+      // VENDA (base)
+      ResetLastError();
+      if(!g_trade.Sell(vol_base,base_symbol,0.0,0.0,0.0,"Boleta L&S - venda base"))
+        {
+         int err      = GetLastError();
+         int retcode  = (int)g_trade.ResultRetcode();
+         string rdesc = g_trade.ResultRetcodeDescription();
+
+         string msg = "Falha ao abrir venda em " + base_symbol +
+                      "\nGetLastError: " + IntegerToString(err) +
+                      "\nRetcode: " + IntegerToString(retcode) +
+                      "\nDescricao: " + rdesc;
+
+         if(retcode == 10018)  // market closed
+            msg = "Nao foi possivel abrir venda em " + base_symbol +
+                  "\nMotivo: mercado fechado (retcode 10018).\n\n"
+                  "Tente novamente no horario de pregão.";
+
+         MessageBox(msg,"Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      // COMPRA (overlay)
+      ResetLastError();
+      if(!g_trade.Buy(vol_over,overlay_symbol,0.0,0.0,0.0,"Boleta L&S - compra overlay"))
+        {
+         int err      = GetLastError();
+         int retcode  = (int)g_trade.ResultRetcode();
+         string rdesc = g_trade.ResultRetcodeDescription();
+
+         string msg = "Falha ao abrir compra em " + overlay_symbol +
+                      "\nGetLastError: " + IntegerToString(err) +
+                      "\nRetcode: " + IntegerToString(retcode) +
+                      "\nDescricao: " + rdesc +
+                      "\n\nA venda em " + base_symbol + " ja foi aberta.\nVerifique as posicoes.";
+
+         if(retcode == 10018)  // market closed
+            msg = "Nao foi possivel abrir compra em " + overlay_symbol +
+                  "\nMotivo: mercado fechado (retcode 10018).\n\n"
+                  "A venda em " + base_symbol + " pode ter sido executada.\nVerifique as posicoes.";
+
+         MessageBox(msg,"Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      // atualiza status
+      UpdatePairStatus(base_symbol,overlay_symbol);
+      return(true);
+     }
+
+   // --- encerra operação de Long & Short
+   bool CloseLongShort(const string base_symbol,const string overlay_symbol)
+     {
+      UpdatePairStatus(base_symbol,overlay_symbol);
+
+      if(!m_pairOpen)
+        {
+         MessageBox("Nao ha operacao aberta para este par.","Boleta L&S",MB_ICONINFORMATION);
+         return(false);
+        }
+
+      bool ok1 = true;
+      bool ok2 = true;
+
+      if(PositionSelect(base_symbol))
+         ok1 = g_trade.PositionClose(base_symbol);
+      if(PositionSelect(overlay_symbol))
+         ok2 = g_trade.PositionClose(overlay_symbol);
+
+      if(!ok1 || !ok2)
+        {
+         MessageBox("Falha ao encerrar completamente a operacao.\nVerifique as posicoes no terminal.","Boleta L&S",MB_ICONERROR);
+         return(false);
+        }
+
+      UpdatePairStatus(base_symbol,overlay_symbol);
+      return(true);
+     }
+
+   // --- chamado no OnTick para atualizar preços e resultado em tempo real
+   void RefreshRealtime()
+     {
+      if(m_baseSymbol=="")
+         m_baseSymbol = _Symbol;
+      if(m_overlaySymbol=="")
+         m_overlaySymbol = _Symbol;
+
+      UpdateTotals(m_baseSymbol,m_overlaySymbol);
+     }
+
+   // --- tratamento de eventos
    virtual bool OnEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
      {
       long chart_id = ChartID();
@@ -423,7 +721,7 @@ public:
       if(m_isUpdating)
          return(CAppDialog::OnEvent(id,lparam,dparam,sparam));
 
-      // símbolos atuais
+      // símbolos atuais a partir dos edits
       string txtCompra = ObjectGetString(chart_id,OBJ_ED_COMPRA,OBJPROP_TEXT);
       string txtVenda  = ObjectGetString(chart_id,OBJ_ED_VENDA, OBJPROP_TEXT);
 
@@ -431,13 +729,16 @@ public:
       StringTrimRight(txtCompra);
       StringTrimLeft(txtVenda);
       StringTrimRight(txtVenda);
-
       StringToUpper(txtCompra);
       StringToUpper(txtVenda);
 
       string base_symbol    = (txtVenda == "" ? _Symbol : txtVenda);
       string overlay_symbol = (txtCompra == "" ? _Symbol : txtCompra);
       ENUM_TIMEFRAMES tf    = PERIOD_D1;
+
+      // guarda para uso no OnTick
+      m_baseSymbol    = base_symbol;
+      m_overlaySymbol = overlay_symbol;
 
       // clique em controles
       if(id == CHARTEVENT_CUSTOM + ON_CLICK)
@@ -477,6 +778,36 @@ public:
 
             Boleta_StyleButton(chart_id,OBJ_BTN_SEARCH,false);
             ChartRedraw();
+
+            UpdateTotals(base_symbol,overlay_symbol);
+            return(true);
+           }
+
+         // Botão INICIAR / ENCERRAR
+         if(lparam == m_btnTrade.Id())
+           {
+            Boleta_StyleButton(chart_id,OBJ_BTN_TRADE,true);
+            ChartRedraw();
+
+            double qty_base = (double)m_edLoteBase.Value();
+            double qty_over = (double)m_edLoteOver.Value();
+            if(qty_base<100) qty_base = 100;
+            if(qty_over<100) qty_over = 100;
+
+            UpdatePairStatus(base_symbol,overlay_symbol);
+
+            bool ok = false;
+            if(!m_pairOpen)
+               ok = OpenLongShort(base_symbol,overlay_symbol,qty_base,qty_over);
+            else
+               ok = CloseLongShort(base_symbol,overlay_symbol);
+
+            Boleta_StyleButton(chart_id,OBJ_BTN_TRADE,false);
+            ChartRedraw();
+
+            if(ok)
+               UpdateTotals(base_symbol,overlay_symbol);
+
             return(true);
            }
         }
@@ -535,15 +866,15 @@ void OnDeinit(const int reason)
   }
 
 //+------------------------------------------------------------------+
-//| OnTick                                                           |
+//| OnTick - atualiza progresso da operação em tempo real            |
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   // se quiser, pode atualizar totais em tempo real aqui depois
+   g_boleta.RefreshRealtime();
   }
 
 //+------------------------------------------------------------------+
-//| OnChartEvent: só repassa para o dialog                           |
+//| OnChartEvent: repassa para o dialog                              |
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id,
                   const long &lparam,
