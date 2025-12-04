@@ -1,17 +1,32 @@
-param(
-    [string]$msg = "Atualização da Boleta L&S"
+# commit_boleta.ps1
+# Script para enviar automaticamente arquivos para o GitHub
+
+# ============================
+# 🔧 MENSAGEM DO COMMIT
+# ============================
+$msg = "Primeira nova versao"
+
+# ============================
+# 🔎 Caminho absoluto do bol.mq5
+# ============================
+$bolFile = "$env:APPDATA\MetaQuotes\Terminal\38FF261A42172F3478E54D3A1A8FE02B\MQL5\Experts\bol\bol.mq5"
+
+# ============================
+# 📂 Arquivos a serem enviados
+# ============================
+$arquivos = @(
+    "Experts/Boleta2.mq5",
+    "commit_boleta.ps1",
+    $bolFile
 )
 
-# Caminho da boleta
-$boleta = "Experts/Boleta-L&S.mq5"
+Write-Host "🔄 Adicionando arquivos..." -ForegroundColor Cyan
+git add $arquivos
 
-# Adiciona a boleta ao commit
-git add "$boleta"
-
-# Cria o commit
+Write-Host "📌 Commitando com a mensagem: $msg" -ForegroundColor Yellow
 git commit -m "$msg"
 
-# Envia para o GitHub
+Write-Host "⬆️ Enviando para GitHub..." -ForegroundColor Green
 git push
 
-#.\commit_boleta.ps1 -msg 
+Write-Host "✅ Finalizado com sucesso!" -ForegroundColor Green
