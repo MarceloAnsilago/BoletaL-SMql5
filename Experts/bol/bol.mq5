@@ -52,6 +52,9 @@ CLabel     g_lbFormVenda;
 CLabel     g_lbFormCompra;
 CLabel     g_lbSaldo;
 CLabel     g_lbSaldoDet;
+CLabel     g_lbPLVenda;
+CLabel     g_lbPLCompra;
+CLabel     g_lbPLTotal;
 
 // trade
 CTrade     g_trade;
@@ -113,8 +116,50 @@ bool IsPairOpen(const string base_symbol,const string overlay_symbol)
 
 void UpdateTradeUI(const string base_symbol,const string overlay_symbol)
   {
-   g_pair_open = IsPairOpen(base_symbol,overlay_symbol);
+   double vol_sell=0, vol_buy=0;
+   double pl_sell=0, pl_buy=0;
+   double open_sell=0, open_buy=0;
+   double now_sell=0, now_buy=0;
+   bool has_sell=false, has_buy=false;
+
+   if(PositionSelect(base_symbol) && PositionGetInteger(POSITION_MAGIC)==BOL_MAGIC)
+     {
+      if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_SELL)
+        {
+         has_sell  = true;
+         vol_sell  = PositionGetDouble(POSITION_VOLUME);
+         pl_sell   = PositionGetDouble(POSITION_PROFIT);
+         open_sell = PositionGetDouble(POSITION_PRICE_OPEN);
+         now_sell  = SymbolInfoDouble(base_symbol,SYMBOL_BID);
+        }
+     }
+
+   if(PositionSelect(overlay_symbol) && PositionGetInteger(POSITION_MAGIC)==BOL_MAGIC)
+     {
+      if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY)
+        {
+         has_buy  = true;
+         vol_buy  = PositionGetDouble(POSITION_VOLUME);
+         pl_buy   = PositionGetDouble(POSITION_PROFIT);
+         open_buy = PositionGetDouble(POSITION_PRICE_OPEN);
+         now_buy  = SymbolInfoDouble(overlay_symbol,SYMBOL_BID);
+        }
+     }
+
+   g_pair_open = (has_sell && has_buy);
    g_btnTrade.Text(g_pair_open ? "Encerrar operacao" : "Iniciar operacao");
+
+   if(has_sell)
+      g_lbPLVenda.Text(StringFormat("P&L vendido: %.2f (vol: %.2f | %.2f -> %.2f)",pl_sell,vol_sell,open_sell,now_sell));
+   else
+      g_lbPLVenda.Text("P&L vendido: sem posicao.");
+
+   if(has_buy)
+      g_lbPLCompra.Text(StringFormat("P&L comprado: %.2f (vol: %.2f | %.2f -> %.2f)",pl_buy,vol_buy,open_buy,now_buy));
+   else
+      g_lbPLCompra.Text("P&L comprado: sem posicao.");
+
+   g_lbPLTotal.Text(StringFormat("P&L total: %.2f",pl_sell+pl_buy));
 
    if(g_pair_open)
       g_lbStatus.Text("Operacao aberta: vende "+base_symbol+" / compra "+overlay_symbol);
@@ -202,7 +247,7 @@ bool CreateInterface()
   {
    long chart_id = ChartID();
 
-   if(!g_dialog.Create(chart_id, DLG_NAME, 0, 10, 10, 600, 460))
+   if(!g_dialog.Create(chart_id, DLG_NAME, 0, 10, 10, 620, 520))
       return false;
 
    if(!g_lbVenda.Create(chart_id, LB_VENDA_NAME, 0, 20, 30, 160, 50))
@@ -261,7 +306,15 @@ void OnDeinit(const int reason)
   }
 
 // OnTick
-void OnTick() {}
+void OnTick()
+  {
+   if(g_pair_open)
+     {
+      string venda  = NormalizeSymbol(g_edVenda.Text());
+      string compra = NormalizeSymbol(g_edCompra.Text());
+      UpdateTradeUI(venda,compra);
+     }
+  }
 
 
 // EVENTOS
@@ -271,14 +324,15 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
 
    bool is_change_evt = false;
 
-   if(id == CHARTEVENT_CUSTOM)
-     {
-      if((lparam == ON_CHANGE || lparam == CONTROLS_SELF_MESSAGE) &&
-         (dparam == g_edLoteVenda.Id() || dparam == g_edLoteCompra.Id() ||
-          sparam == ED_LOTE_VENDA_NAME || sparam == ED_LOTE_COMPRA_NAME))
-         is_change_evt = true;
-     }
-
+   // cobre formatos possiveis do SpinEdit (EventChartCustom)
+   if(id == CHARTEVENT_CUSTOM + ON_CHANGE &&
+      (lparam == g_edLoteVenda.Id() || lparam == g_edLoteCompra.Id() ||
+       sparam == ED_LOTE_VENDA_NAME || sparam == ED_LOTE_COMPRA_NAME))
+      is_change_evt = true;
+   else if(id == CHARTEVENT_CUSTOM && lparam == ON_CHANGE &&
+           (dparam == g_edLoteVenda.Id() || dparam == g_edLoteCompra.Id() ||
+            sparam == ED_LOTE_VENDA_NAME || sparam == ED_LOTE_COMPRA_NAME))
+      is_change_evt = true;
    if(is_change_evt)
      {
       if(g_suppress_change_events > 0)
@@ -364,4 +418,13 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
       UpdateTradeUI(venda,compra);
      }
   }
+
+
+
+
+
+
+
+
+
 

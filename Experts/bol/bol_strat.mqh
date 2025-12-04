@@ -24,6 +24,9 @@
 #define LB_SALDO_DET_NAME    BOL_PREFIX"lb_saldo_det"
 #define LB_STATUS_NAME       BOL_PREFIX"lb_status"
 #define BTN_TRADE_NAME       BOL_PREFIX"btn_trade"
+#define LB_PL_VENDA_NAME     BOL_PREFIX"lb_pl_venda"
+#define LB_PL_COMPRA_NAME    BOL_PREFIX"lb_pl_compra"
+#define LB_PL_TOTAL_NAME     BOL_PREFIX"lb_pl_total"
 
 // declaracoes dos controles (definidos no bol.mq5)
 extern CLabel    g_lbLoteVenda;
@@ -39,6 +42,9 @@ extern CLabel  g_lbSaldo;
 extern CLabel  g_lbSaldoDet;
 extern CLabel  g_lbStatus;
 extern CButton g_btnTrade;
+extern CLabel  g_lbPLVenda;
+extern CLabel  g_lbPLCompra;
+extern CLabel  g_lbPLTotal;
 
 extern bool    g_recalc_in_progress;
 extern int     g_suppress_change_events;
@@ -118,15 +124,34 @@ bool Strat_CreateUI(const long chart_id,CAppDialog &dlg)
    if(!dlg.Add(g_lbSaldoDet))
       return(false);
 
+   // P&L da operacao
+   if(!g_lbPLVenda.Create(chart_id,LB_PL_VENDA_NAME,0,20,305,430,325))
+      return(false);
+   g_lbPLVenda.Text("P&L vendido: -");
+   if(!dlg.Add(g_lbPLVenda))
+      return(false);
+
+   if(!g_lbPLCompra.Create(chart_id,LB_PL_COMPRA_NAME,0,20,325,430,345))
+      return(false);
+   g_lbPLCompra.Text("P&L comprado: -");
+   if(!dlg.Add(g_lbPLCompra))
+      return(false);
+
+   if(!g_lbPLTotal.Create(chart_id,LB_PL_TOTAL_NAME,0,20,345,430,365))
+      return(false);
+   g_lbPLTotal.Text("P&L total: -");
+   if(!dlg.Add(g_lbPLTotal))
+      return(false);
+
    // status operacao
-   if(!g_lbStatus.Create(chart_id,LB_STATUS_NAME,0,20,310,430,330))
+   if(!g_lbStatus.Create(chart_id,LB_STATUS_NAME,0,20,370,430,390))
       return(false);
    g_lbStatus.Text("Nenhuma operacao aberta.");
    if(!dlg.Add(g_lbStatus))
       return(false);
 
    // botao trade (iniciar/encerrar)
-   if(!g_btnTrade.Create(chart_id,BTN_TRADE_NAME,0,20,340,220,370))
+   if(!g_btnTrade.Create(chart_id,BTN_TRADE_NAME,0,20,400,240,435))
       return(false);
    g_btnTrade.Text("Iniciar operacao");
    if(!dlg.Add(g_btnTrade))
